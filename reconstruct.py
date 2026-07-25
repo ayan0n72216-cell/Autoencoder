@@ -54,7 +54,7 @@ def main() -> None:
     test_loader = DataLoader(
         test_dataset,
         batch_size=8,
-        shuffle=False,
+        shuffle=True,
         num_workers=0,
         pin_memory=device.type == "cuda",
     )
