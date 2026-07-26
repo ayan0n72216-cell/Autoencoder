@@ -131,7 +131,7 @@ Decoder（解码器）用 3 层 `ConvTranspose2d` 对称地放大空间尺寸，
 像素数值上越接近原图。训练过程通过反向传播调整 Encoder 和 Decoder 的参数，使这个
 误差逐渐减小。
 
-## 为什么它还不是真正的 AI Codec
+## 和 AI Codec 的连接
 
 这个项目已经具备 Autoencoder 的核心结构：Encoder 把图像映射为 latent，Decoder 再从
 latent 重建图像。但是，latent 还是内存中的连续浮点数，没有被变成可存储、可传输的
