@@ -42,6 +42,10 @@ class ConvAutoencoder(nn.Module):
             nn.Sigmoid(),
         )
 
+    def encode(self, images: torch.Tensor) -> torch.Tensor:
+        """只运行编码器，返回量化前的中间数据。"""
+        return self.encoder(images)
+
     def forward(
         self, x: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
