@@ -46,6 +46,10 @@ class ConvAutoencoder(nn.Module):
         """只运行编码器，返回量化前的中间数据。"""
         return self.encoder(images)
 
+    def decode(self, latent: torch.Tensor) -> torch.Tensor:
+        """只运行解码器，根据中间数据恢复图片。"""
+        return self.decoder(latent)
+
     def forward(
         self, x: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
