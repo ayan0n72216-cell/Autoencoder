@@ -92,7 +92,7 @@ def main() -> None:
         for images, _ in train_loader:
             images = images.to(device, non_blocking=device.type == "cuda")
 
-            reconstructed, _ = model(images)
+            reconstructed, _, _ = model(images)
             loss = criterion(reconstructed, images)
 
             optimizer.zero_grad()
@@ -110,7 +110,7 @@ def main() -> None:
         # 保存两行对比图：第一行原图，第二行重建图。
         model.eval()
         with torch.no_grad():
-            fixed_reconstructed, _ = model(fixed_images)
+            fixed_reconstructed, _, _ = model(fixed_images)
         comparison = torch.cat(
             (fixed_images.cpu(), fixed_reconstructed.cpu()),
             dim=0,

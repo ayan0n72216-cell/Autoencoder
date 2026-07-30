@@ -2,6 +2,15 @@ import torch
 from torch import nn
 
 
+def quantize(latent: torch.Tensor, training: bool) -> torch.Tensor:
+    """训练时用均匀噪声近似量化，测试时执行真正的四舍五入。"""
+    if training:
+        noise = torch.empty_like(latent).uniform_(-0.5, 0.5)
+        return latent + noise
+
+    return torch.round(latent)
+
+
 class ConvAutoencoder(nn.Module):
     """一个用于 CIFAR-10 图像重建的简单卷积 Autoencoder。"""
 
@@ -33,7 +42,19 @@ class ConvAutoencoder(nn.Module):
             nn.Sigmoid(),
         )
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def encode(self, images: torch.Tensor) -> torch.Tensor:
+        """只运行编码器，返回量化前的中间数据。"""
+        return self.encoder(images)
+
+    def decode(self, latent: torch.Tensor) -> torch.Tensor:
+        """只运行解码器，根据中间数据恢复图片。"""
+        return self.decoder(latent)
+
+    def forward(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         latent = self.encoder(x)
-        reconstructed = self.decoder(latent)
-        return reconstructed, latent
+        # self.training 会随 model.train() / model.eval() 自动切换。
+        quantized_latent = quantize(latent, training=self.training)
+        reconstructed = self.decoder(quantized_latent)
+        return reconstructed, latent, quantized_latent

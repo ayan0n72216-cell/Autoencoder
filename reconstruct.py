@@ -65,11 +65,21 @@ def main() -> None:
 
     # eval() 关闭训练模式；no_grad() 避免保存梯度，推理更省显存。
     with torch.no_grad():
-        reconstructed_images, latent = model(original_images)
+        reconstructed_images, latent, quantized_latent = model(original_images)
 
     print(f"原图片张量尺寸: {list(original_images.shape)}")
-    print(f"latent 张量尺寸: {list(latent.shape)}")
+    print(f"原始 latent 张量尺寸: {list(latent.shape)}")
+    print(f"量化 latent 张量尺寸: {list(quantized_latent.shape)}")
     print(f"重建图片张量尺寸: {list(reconstructed_images.shape)}")
+
+    print("第一张图片量化前的前20个 latent 数值:")
+    print(latent[0].flatten()[:20].cpu())
+
+    print("第一张图片量化后的前20个 latent 数值:")
+    print(quantized_latent[0].flatten()[:20].cpu())
+
+    quantization_error = torch.mean(torch.abs(latent - quantized_latent))
+    print(f"平均绝对量化误差: {quantization_error.item():.6f}")
 
     # nrow=8 使前 8 张原图位于第一行，后 8 张重建图位于第二行。
     comparison = torch.cat(
