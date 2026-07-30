@@ -1,10 +1,13 @@
 import argparse
+from dataclasses import dataclass
 from pathlib import Path
 
 import torch
 from torchvision.utils import save_image
 
 from compress import (
+    DEFAULT_CHECKPOINT_PATH,
+    DEFAULT_CODEBOOK_PATH,
     FILE_MAGIC,
     FILE_VERSION,
     HEADER_STRUCT,
@@ -12,6 +15,20 @@ from compress import (
 )
 from huffman_encoding import decode_integers
 from model import ConvAutoencoder
+
+
+@dataclass
+class DecompressionResult:
+    """一次解压后，评估和命令行输出需要使用的结果。"""
+
+    decoded_values: list[int]
+    quantized_shape: tuple[int, int, int, int]
+    reconstructed_tensor: torch.Tensor
+    image_width: int
+    image_height: int
+    valid_bit_count: int
+    huffman_data_size: int
+    output_path: Path
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,13 +50,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoint",
         type=Path,
-        default=Path("checkpoints") / "conv_autoencoder.pth",
+        default=DEFAULT_CHECKPOINT_PATH,
         help="模型参数文件（默认：checkpoints/conv_autoencoder.pth）",
     )
     parser.add_argument(
         "--codebook",
         type=Path,
-        default=Path("codebook.json"),
+        default=DEFAULT_CODEBOOK_PATH,
         help="霍夫曼编码表（默认：codebook.json）",
     )
     return parser.parse_args()
@@ -132,23 +149,28 @@ def read_compressed_file(
     )
 
 
-def main() -> None:
-    args = parse_args()
-
-    if args.output.exists():
+def decompress_file(
+    input_path: Path,
+    output_path: Path,
+    checkpoint_path: Path = DEFAULT_CHECKPOINT_PATH,
+    codebook_path: Path = DEFAULT_CODEBOOK_PATH,
+    device: torch.device | None = None,
+) -> DecompressionResult:
+    """执行一次完整解压，并返回评估需要的中间结果。"""
+    if output_path.exists():
         raise FileExistsError(
-            f"输出图片已存在：{args.output}。"
-            "为避免覆盖原文件，请更换 --output 路径。"
+            f"输出图片已存在：{output_path}。"
+            "为避免覆盖原文件，请更换输出路径。"
         )
-    if not args.checkpoint.exists():
+    if not checkpoint_path.exists():
         raise FileNotFoundError(
-            f"找不到模型参数文件：{args.checkpoint}。"
-            "请确认 --checkpoint 路径正确。"
+            f"找不到模型参数文件：{checkpoint_path}。"
+            "请确认模型参数路径正确。"
         )
-    if not args.codebook.exists():
+    if not codebook_path.exists():
         raise FileNotFoundError(
-            f"找不到霍夫曼编码表：{args.codebook}。"
-            "请确认 --codebook 路径正确。"
+            f"找不到霍夫曼编码表：{codebook_path}。"
+            "请确认编码表路径正确。"
         )
 
     (
@@ -156,9 +178,9 @@ def main() -> None:
         latent_element_count,
         valid_bit_count,
         huffman_data,
-    ) = read_compressed_file(args.input)
+    ) = read_compressed_file(input_path)
 
-    codebook = load_codebook(args.codebook)
+    codebook = load_codebook(codebook_path)
     decoded_values = decode_integers(
         encoded_data=huffman_data,
         valid_bit_count=valid_bit_count,
@@ -183,15 +205,14 @@ def main() -> None:
         latent_width,
     )
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if device.type == "cuda":
-        print(f"使用设备：图形处理器（GPU），{torch.cuda.get_device_name(0)}")
-    else:
-        print("使用设备：中央处理器（CPU）")
+    if device is None:
+        device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
 
     model = ConvAutoencoder().to(device)
     state_dict = torch.load(
-        args.checkpoint,
+        checkpoint_path,
         map_location=device,
     )
     model.load_state_dict(state_dict)
@@ -207,21 +228,57 @@ def main() -> None:
 
     # 当前训练图片位于 [0, 1]，保存前限制到相同的合法像素范围。
     reconstructed_image = reconstructed_image.clamp(0.0, 1.0)
+    reconstructed_on_cpu = reconstructed_image.cpu()
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    save_image(reconstructed_image.cpu(), args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    save_image(reconstructed_on_cpu, output_path)
 
-    image_height = reconstructed_image.size(2)
-    image_width = reconstructed_image.size(3)
+    quantized_shape = (
+        1,
+        latent_channels,
+        latent_height,
+        latent_width,
+    )
+    return DecompressionResult(
+        decoded_values=decoded_values,
+        quantized_shape=quantized_shape,
+        reconstructed_tensor=reconstructed_on_cpu,
+        image_width=int(reconstructed_image.size(3)),
+        image_height=int(reconstructed_image.size(2)),
+        valid_bit_count=valid_bit_count,
+        huffman_data_size=len(huffman_data),
+        output_path=output_path,
+    )
+
+
+def main() -> None:
+    args = parse_args()
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device.type == "cuda":
+        print(f"使用设备：图形处理器（GPU），{torch.cuda.get_device_name(0)}")
+    else:
+        print("使用设备：中央处理器（CPU）")
+
+    result = decompress_file(
+        input_path=args.input,
+        output_path=args.output,
+        checkpoint_path=args.checkpoint,
+        codebook_path=args.codebook,
+        device=device,
+    )
 
     print("\n解压缩完成：")
     print(
         "解码出的中间数据形状："
-        f"{list(quantized_latent.shape)}"
+        f"{list(result.quantized_shape)}"
     )
-    print(f"解码出的整数数量：{len(decoded_values):,}")
-    print(f"恢复图片宽度和高度：{image_width} × {image_height}")
-    print(f"恢复图片保存位置：{args.output.resolve()}")
+    print(f"解码出的整数数量：{len(result.decoded_values):,}")
+    print(
+        "恢复图片宽度和高度："
+        f"{result.image_width} × {result.image_height}"
+    )
+    print(f"恢复图片保存位置：{result.output_path.resolve()}")
     print(
         "\n说明：恢复该图片需要压缩时使用的同一份模型参数和 "
         "codebook.json。"
